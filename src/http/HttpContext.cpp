@@ -7,60 +7,80 @@
 
 namespace lean_web_server::http {
 
+bool HttpContext::parse_request_line_state(net::Buffer& buffer, bool& has_more) {
+    const char* crlf = find_crlf(buffer);
+    if (crlf == nullptr) {
+        has_more = false;
+        return true;
+    }
+
+    const char* begin = buffer.read_ptr() + checked_bytes_;
+    const char* end = crlf;
+    if (!process_request_line(begin, end)) {
+        return false;
+    }
+    parse_state_ = HttpRequestParseState::kExpectHeaders;
+    checked_bytes_ = crlf - buffer.read_ptr() + 2;
+    return true;
+}
+
+bool HttpContext::parse_headers_state(net::Buffer& buffer, bool& has_more) {
+    const char* crlf = find_crlf(buffer);
+    if (crlf == nullptr) {
+        has_more = false;
+        return true;
+    }
+
+    const char* begin = buffer.read_ptr() + checked_bytes_;
+    const char* end = crlf;
+    if (begin == end) {
+        if (body_length_ > 0) {
+            parse_state_ = HttpRequestParseState::kExpectBody;
+        } else {
+            parse_state_ = HttpRequestParseState::kDone;
+        }
+        checked_bytes_ = crlf - buffer.read_ptr() + 2;
+        return true;
+    }
+    if (!process_headers(begin, end)) {
+        return false;
+    }
+    checked_bytes_ = crlf - buffer.read_ptr() + 2;
+    return true;
+}
+
+void HttpContext::parse_body_state(net::Buffer& buffer, bool& has_more) {
+    if (SIZE_MAX - checked_bytes_ < body_length_ ||
+        buffer.read_available() < checked_bytes_ + body_length_) {
+        has_more = false;
+        return;
+    }
+
+    body_ = {checked_bytes_, body_length_};
+    parse_state_ = HttpRequestParseState::kDone;
+    checked_bytes_ += body_length_;
+}
+
 bool HttpContext::parse_request(net::Buffer& buffer) {
     bool has_more = true;
     while (has_more) {
         switch (parse_state_) {
-            case HttpRequestParseState::kExpectRequestLine: {  // 解析请求行
-                const char* crlf = find_crlf(buffer);
-                if (crlf == nullptr) {  // 解析到缓冲区末尾，等待更多数据
-                    has_more = false;
-                    continue;
-                }
-
-                const char *begin = buffer.read_ptr() + checked_bytes_, *end = crlf;
-                if (!process_request_line(begin, end)) {  // 解析请求行失败
+            case HttpRequestParseState::kExpectRequestLine:
+                if (!parse_request_line_state(buffer, has_more)) {
                     return false;
                 }
-                parse_state_ = HttpRequestParseState::kExpectHeaders;
-                checked_bytes_ = crlf - buffer.read_ptr() + 2;
                 break;
-            }
-            case HttpRequestParseState::kExpectHeaders: {  // 解析请求头
-                const char* crlf = find_crlf(buffer);
-                if (crlf == nullptr) {  // 解析到缓冲区末尾，等待更多数据
-                    has_more = false;
-                    continue;
-                }
-
-                const char *begin = buffer.read_ptr() + checked_bytes_, *end = crlf;
-                if (begin == end) {  // 解析到空行，请求头解析完成
-                    parse_state_ = body_length_ > 0 ? HttpRequestParseState::kExpectBody
-                                                    : HttpRequestParseState::kDone;
-                    checked_bytes_ = crlf - buffer.read_ptr() + 2;
-                    continue;
-                }
-                if (!process_headers(begin, end)) {  // 解析请求头失败
+            case HttpRequestParseState::kExpectHeaders:
+                if (!parse_headers_state(buffer, has_more)) {
                     return false;
                 }
-                checked_bytes_ = crlf - buffer.read_ptr() + 2;
                 break;
-            }
-            case HttpRequestParseState::kExpectBody: {                          // 解析请求体
-                if (buffer.read_available() < checked_bytes_ + body_length_) {  // 等待更多数据
-                    has_more = false;
-                    continue;
-                }
-
-                body_ = {checked_bytes_, body_length_};
-                parse_state_ = HttpRequestParseState::kDone;
-                checked_bytes_ += body_length_;
+            case HttpRequestParseState::kExpectBody:
+                parse_body_state(buffer, has_more);
                 break;
-            }
-            case HttpRequestParseState::kDone: {  // 解析完成
+            case HttpRequestParseState::kDone:
                 has_more = false;
                 break;
-            }
         }
     }
     return true;
@@ -80,6 +100,10 @@ bool HttpContext::process_request_line(const char* begin, const char* end) {
 
     if (pos1 == 0 || pos2 == pos1 + 1 ||
         pos2 == sv.size() - 1) {  // 方法、路径或版本号为空，解析失败
+        return false;
+    }
+    std::string_view ver = sv.substr(pos2 + 1);
+    if (ver.rfind("HTTP/", 0) != 0) {  // 版本号必须以 HTTP/ 开头
         return false;
     }
     method_ = {0, pos1};
@@ -117,7 +141,8 @@ bool HttpContext::process_headers(const char* begin, const char* end) {
 
         auto result =
             std::from_chars(value_sv.data(), value_sv.data() + value_sv.size(), body_length_);
-        if (result.ec != std::errc()) {  // 解析 Content-Length 失败
+        if (result.ec != std::errc() ||
+            result.ptr != value_sv.data() + value_sv.size()) {  // 解析 Content-Length 失败
             return false;
         }
     }
@@ -129,8 +154,9 @@ bool HttpContext::process_headers(const char* begin, const char* end) {
     return true;
 }
 
-const char* HttpContext::find_crlf(const net::Buffer& data) const {
-    std::string_view sv(data.read_ptr() + checked_bytes_, data.read_available() - checked_bytes_);
+const char* HttpContext::find_crlf(const net::Buffer& buffer) const {
+    std::string_view sv(buffer.read_ptr() + checked_bytes_,
+                        buffer.read_available() - checked_bytes_);
     auto result = sv.find("\r\n");
     return result != std::string_view::npos ? sv.data() + result : nullptr;
 }

@@ -13,7 +13,7 @@ int Buffer::read_fd(int fd, int& saved_errno) {
 
     // 使用栈内存作为临时缓冲区，避免堆分配和锁竞争
     std::array<char, 65536> temp;
-    std::array<struct iovec, 2> iov;
+    std::array<struct iovec, 2> iov{};
 
     iov[0].iov_base = buffer_.data() + write_index_;
     iov[0].iov_len = write_available_before;

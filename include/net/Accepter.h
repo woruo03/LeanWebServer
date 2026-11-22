@@ -1,76 +1,71 @@
 /**
  * @file Accepter.h
- * @brief 监听套接字的独立封装组件
+ * @brief 监听套接字独立封装组件，负责服务端口绑定、监听与新连接 accept 接收
  * @author woruo03
  * @date 2026-11-05
  * @version 1.0
  */
 
 #pragma once
+
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <cstdint>
+#include <functional>
 
+#include "base/NonCopyable.h"
 #include "net/Channel.h"
 
 namespace lean_web_server::net {
 
 class EventLoop;
 
-class Accepter {
+/**
+ * @class Accepter
+ * @brief 服务端监听套接字 RAII 封装组件
+ *
+ * 核心机制：
+ * - 构造时自动创建非阻塞 CLOEXEC 监听套接字，设置 SO_REUSEADDR/SO_REUSEPORT 并 bind/listen；
+ * - 暴露 valid() 接口，支持调用方前置探测端口绑定状态；
+ * - 析构与 stop() 严格遵循 RAII：注销 Channel 并关闭底层 listen_fd_；
+ * - 新连接到达时，通过 accept4(..., SOCK_NONBLOCK | SOCK_CLOEXEC) 快速提取并通过回调分发。
+ */
+class Accepter : base::NonCopyable {
 public:
     using NewConnectionCallback = std::function<void(int sockfd)>;
 
-    Accepter(EventLoop* event_loop, uint16_t port)
-        :  // event_loop_(event_loop),
-           // 创建监听套接字，设置非阻塞和关闭执行选项
-          listen_fd_(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)),
-          accept_channel_(event_loop, listen_fd_) {
-        int opt_val = 1, ret = 0;
-        // 设置 SO_REUSEADDR 选项，允许地址重用
-        ret = ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val));
-        if (ret == -1) {
-            ::close(listen_fd_);
-            return;
-        }
+    Accepter(EventLoop* event_loop, uint16_t port);
+    ~Accepter();
 
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        // 绑定监听套接字到指定端口
-        ret = ::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-        if (ret == -1) {
-            ::close(listen_fd_);
-            return;
-        }
+    /// 停止监听（解挂 Channel 并关闭 listen_fd_，进入拒绝新连接状态）
+    void stop();
 
-        // 监听端口，等待连接
-        ret = ::listen(listen_fd_, SOMAXCONN);
-        if (ret == -1) {
-            ::close(listen_fd_);
-            return;
-        }
+    /// 判断监听套接字是否已主动停止
+    [[nodiscard]] bool is_stopped() const { return stopped_; }
 
-        // 设置读取回调
-        accept_channel_.set_read_callback([this] { handle_read(); });
+    /// 判断底层套接字是否有效创建且绑定成功
+    [[nodiscard]] bool valid() const { return listen_fd_ >= 0; }
+
+    /// 开启套接字读事件监听
+    void listen() {
+        if (valid()) {
+            accept_channel_.enable_read();
+        }
     }
 
-    // 启动监听，使通道变为可读状态
-    void listen() { accept_channel_.enable_read(); }
-
+    /// 注册新连接就绪回调
     void set_new_connection_callback(NewConnectionCallback cb) {
         new_connection_callback_ = std::move(cb);
     }
 
 private:
-    // EventLoop* event_loop_;
     int listen_fd_;
     Channel accept_channel_;
     NewConnectionCallback new_connection_callback_;
+    bool stopped_{false};
 
-    // 处理读事件，接受新连接
     void handle_read();
 };
 

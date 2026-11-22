@@ -63,6 +63,11 @@ option(
     OFF
 )
 option(
+    LEAN_WEB_SERVER_ENABLE_CCACHE
+    "Enable ccache compilation acceleration if available"
+    ON
+)
+option(
     LEAN_WEB_SERVER_INSTALL
     "Enable minimal installation of the server executable"
     ${PROJECT_IS_TOP_LEVEL}
@@ -80,6 +85,7 @@ include(CompilerWarnings)
 include(Sanitizers)
 include(Profiling)
 include(StaticAnalyzers)
+include(Ccache)
 
 # 自动生成版本头文件 (写入构建目录，保持源码树干净)
 configure_file(

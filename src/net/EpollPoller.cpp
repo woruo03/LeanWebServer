@@ -1,20 +1,50 @@
+/**
+ * @file EpollPoller.cpp
+ * @brief EpollPoller 实现
+ * @author woruo03
+ * @date 2026-11-18
+ * @version 1.0
+ */
+
 #include "net/EpollPoller.h"
+
+#include <unistd.h>
 
 #include <cerrno>
 
+#include "base/Logger.h"
 #include "net/Channel.h"
 
 namespace lean_web_server::net {
 
+EpollPoller::EpollPoller() : epoll_fd_(::epoll_create1(EPOLL_CLOEXEC)), events_(16) {
+    if (epoll_fd_ < 0) {
+        LOG_FATAL << "Failed to create epoll_fd: errno=" << errno;
+    }
+}
+
+EpollPoller::~EpollPoller() {
+    if (epoll_fd_ >= 0) {
+        ::close(epoll_fd_);
+        epoll_fd_ = -1;
+    }
+}
+
 void EpollPoller::poll(std::vector<Channel*>& active_channels, int timeout) {
     int n = ::epoll_wait(epoll_fd_, events_.data(), static_cast<int>(events_.size()), timeout);
+
+    int saved_errno = errno;
     if (n == -1) {
-        if (errno != EINTR) {
-            // perror("epoll_wait error");
-            // [FIXME]: 忽略 EINTR 错误
+        if (saved_errno != EINTR) {
+            LOG_ERROR << "EpollPoller::poll error: errno=" << saved_errno;
+            if (++consecutive_errors_ >= 1000) {
+                LOG_FATAL << "EpollPoller::poll consecutive error limit (1000) reached, aborting "
+                             "to prevent spin";
+            }
         }
         return;
     }
+    consecutive_errors_ = 0;
 
     for (int i = 0; i < n; ++i) {
         auto* channel = static_cast<Channel*>(events_[i].data.ptr);

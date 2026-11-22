@@ -6,6 +6,7 @@ Checks: >
   modernize-*,
   performance-*,
   readability-*,
+  -bugprone-bad-signal-to-kill-thread,
   -modernize-use-trailing-return-type,
   -modernize-macro-to-enum,
   -readability-isolate-declaration,

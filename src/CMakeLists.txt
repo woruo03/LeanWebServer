@@ -2,8 +2,12 @@
 
 add_library(
     lean_web_server_core
+    base/AsyncLogging.cpp
+    base/Logger.cpp
+    base/Timestamp.cpp
     http/HttpContext.cpp
     http/HttpServer.cpp
+    http/ServerConfig.cpp
     net/Accepter.cpp
     net/Buffer.cpp
     net/Channel.cpp
@@ -11,6 +15,8 @@ add_library(
     net/EventLoop.cpp
     net/EventLoopThreadPool.cpp
     net/TcpConnection.cpp
+    net/TimerQueue.cpp
+    net/TimerWheel.cpp
 )
 add_library(LeanWebServer::core ALIAS lean_web_server_core)
 

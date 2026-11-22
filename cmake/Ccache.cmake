@@ -1,0 +1,20 @@
+# cmake/Ccache.cmake
+# 模块化 ccache 编译缓存配置与自动挂接
+
+if(LEAN_WEB_SERVER_ENABLE_CCACHE)
+    find_program(CCACHE_PROGRAM NAMES ccache)
+    if(CCACHE_PROGRAM)
+        message(STATUS "ccache enabled: ${CCACHE_PROGRAM}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "Compiler launcher for CXX" FORCE)
+        set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "Compiler launcher for C" FORCE)
+    else()
+        message(STATUS "ccache not found, compilation caching disabled")
+    endif()
+else()
+    if(CMAKE_CXX_COMPILER_LAUNCHER MATCHES "ccache")
+        unset(CMAKE_CXX_COMPILER_LAUNCHER CACHE)
+    endif()
+    if(CMAKE_C_COMPILER_LAUNCHER MATCHES "ccache")
+        unset(CMAKE_C_COMPILER_LAUNCHER CACHE)
+    endif()
+endif()

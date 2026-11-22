@@ -37,22 +37,27 @@ else()
     set(GTEST_MAIN_TARGET gtest_main)
 endif()
 
-# 4. 构建单元测试程序
-add_executable(unit_tests test_core.cpp)
-
-target_link_libraries(
-    unit_tests
-    PRIVATE
-        LeanWebServer::core
-        LeanWebServer::warnings
-        LeanWebServer::sanitizers
-        LeanWebServer::profiling
-        Threads::Threads
-        ${GTEST_MAIN_TARGET}
-)
-
-target_compile_features(unit_tests PRIVATE cxx_std_17)
-
-# 5. 深度集成 CTest，自动发现并注册每一个测试用例
+# 4. 辅助函数：定义单元测试目标并注册到 CTest
 include(GoogleTest)
-gtest_discover_tests(unit_tests)
+
+function(lean_add_test target src)
+    add_executable(${target} ${src})
+    target_link_libraries(
+        ${target}
+        PRIVATE
+            LeanWebServer::core
+            LeanWebServer::warnings
+            LeanWebServer::sanitizers
+            Threads::Threads
+            ${GTEST_MAIN_TARGET}
+    )
+    target_compile_features(${target} PRIVATE cxx_std_17)
+    target_compile_definitions(${target} PRIVATE LEAN_WEB_SERVER_TESTING=1)
+    gtest_discover_tests(${target})
+endfunction()
+
+lean_add_test(tests_base   test_timestamp.cpp)
+lean_add_test(tests_logger test_logger.cpp)
+lean_add_test(tests_net    test_timer.cpp)
+lean_add_test(tests_http   test_integration_timeout.cpp)
+lean_add_test(tests_config test_server_config.cpp)
